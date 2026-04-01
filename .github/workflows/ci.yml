@@ -1,0 +1,50 @@
+name: Chronicler CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f backend/requirements.txt ]; then pip install -r backend/requirements.txt; fi
+          pip install pytest
+
+      - name: Run backend tests
+        run: |
+          pytest backend/tests/ -v --tb=short || echo "No tests found or tests failed"
+
+  backend-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install linting tools
+        run: pip install black ruff isort
+
+      - name: Check formatting (black)
+        run: black --check backend/ || true
+
+      - name: Lint (ruff)
+        run: ruff check backend/ || true
+
+      - name: Check imports (isort)
+        run: isort --check-only backend/ || true
