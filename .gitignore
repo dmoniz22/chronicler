@@ -1,0 +1,30 @@
+# Python
+venv/
+venv*/
+backend/venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Node
+frontend/node_modules/
+node_modules/
+dist/
+.next/
+
+# Environment
+.env
+.env.*
+
+# Neo4j data & logs (regenerated at runtime) - DO NOT COMMIT
+neo4j/data/
+neo4j/logs/
+neo4j/
+
+# PID files and logs
+*.pid
+.*.pid
+*.log
+
+# OS
+.DS_Store
