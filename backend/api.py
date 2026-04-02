@@ -615,13 +615,15 @@ async def save_settings(req: SettingsRequest):
 
 
 @app.get("/settings/models")
-async def list_models():
-    """List available models for the configured provider."""
-    provider = _os.environ.get("AI_PROVIDER", "openrouter")
+async def list_models(provider: str = None, ollama_url: str = None):
+    """List available models. Provider and URL can be passed as query params."""
+    if not provider:
+        provider = _os.environ.get("AI_PROVIDER", "openrouter")
+    if not ollama_url:
+        ollama_url = _os.environ.get("OLLAMA_URL", "http://localhost:11434")
     if provider == "ollama":
         from ai_client import list_ollama_models
 
-        ollama_url = _os.environ.get("OLLAMA_URL", "http://localhost:11434")
         models = await list_ollama_models(ollama_url)
         return {
             "provider": "ollama",

@@ -42,7 +42,9 @@ export default function SettingsPage() {
 
   const loadModels = async () => {
     try {
-      const res = await fetch(`${API_BASE}/settings/models`);
+      const params = new URLSearchParams({ provider });
+      if (provider === "ollama") params.set("ollama_url", ollamaUrl);
+      const res = await fetch(`${API_BASE}/settings/models?${params}`);
       const data = await res.json();
       setModels(data.models || []);
     } catch {
