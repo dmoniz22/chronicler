@@ -59,8 +59,8 @@ export default async function DocumentsPage({ searchParams }: {
             </div>
             <div className="prose prose-invert max-w-none">
               <p className="text-slate-300 whitespace-pre-wrap">
-                {selectedDoc.content.slice(0, 3000)}
-                {selectedDoc.content.length > 3000 && '...'}
+                {(selectedDoc.content || '').slice(0, 3000)}
+                {(selectedDoc.content || '').length > 3000 && '...'}
               </p>
             </div>
             <p className="text-slate-500 text-sm mt-4">

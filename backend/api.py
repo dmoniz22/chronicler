@@ -93,10 +93,11 @@ async def get_document(document_id: str):
     """Get a specific document by path."""
     from urllib.parse import unquote_plus
 
-    # Decode URL-encoded characters and add leading slash back
+    # Decode URL-encoded characters
     # unquote_plus handles both %20 and + as spaces
     decoded_path = unquote_plus(document_id)
-    path = "/" + decoded_path
+    # Only prepend / if not already present (avoid //home/... when %2F decoded)
+    path = decoded_path if decoded_path.startswith("/") else "/" + decoded_path
     with driver.session() as session:
         result = session.run(
             "MATCH (d:Document {path: $path}) RETURN d", {"path": path}
