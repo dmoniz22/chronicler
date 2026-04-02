@@ -1,168 +1,334 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Link from "next/link";
-
-interface Town { name: string; element: string; type: string; description: string; }
-interface Character { name: string; element: string; role: string; traits: string[]; concept: string; }
-interface Technique { name: string; element: string; difficulty: string; description: string; }
-interface Plot { plot: string; element: string; type: string; }
+import { API_BASE } from "@/lib/api";
 
 const ELEMENTS = ["Fire", "Water", "Earth", "Wind", "Spirit", "Any"];
-const ROLES = ["ally", "mentor", "rival", "antagonist", "neutral"];
-const DIFFICULTIES = ["basic", "intermediate", "advanced", "master"];
+const CATEGORIES = [
+  { id: "towns", label: "Towns", icon: "🏘️" },
+  { id: "characters", label: "Characters", icon: "👤" },
+  { id: "magic", label: "Magic", icon: "✨" },
+  { id: "plots", label: "Plot Seeds", icon: "📖" },
+];
+
+interface IdeaResult {
+  [key: string]: any;
+}
 
 export default function IdeaForgePage() {
-  const [activeTab, setActiveTab] = useState<"towns" | "characters" | "magic" | "plots">("towns");
+  const [activeTab, setActiveTab] = useState<string>("towns");
   const [element, setElement] = useState("Any");
-  const [towns, setTowns] = useState<Town[]>([]);
-  const [characters, setCharacters] = useState<Character[]>([]);
-  const [techniques, setTechniques] = useState<Technique[]>([]);
-  const [plots, setPlots] = useState<Plot[]>([]);
+  const [mode, setMode] = useState<"quick" | "ai">("quick");
+  const [customPrompt, setCustomPrompt] = useState("");
+  const [results, setResults] = useState<IdeaResult[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [aiModel, setAiModel] = useState("");
 
   const generate = async () => {
     setLoading(true);
+    setError("");
+    setResults([]);
+
     const elem = element === "Any" ? null : element;
-    
+
     try {
-      if (activeTab === "towns") {
-        const res = await fetch(`http://localhost:8004/idea-forge/towns?element=${elem || ''}&count=5`);
+      if (mode === "quick") {
+        // Template-based generation
+        const endpoints: Record<string, string> = {
+          towns: `${API_BASE}/idea-forge/towns`,
+          characters: `${API_BASE}/idea-forge/characters`,
+          magic: `${API_BASE}/idea-forge/magic-techniques`,
+          plots: `${API_BASE}/idea-forge/plot-seeds`,
+        };
+        const url = new URL(endpoints[activeTab]);
+        if (elem) url.searchParams.set("element", elem);
+        url.searchParams.set("count", "5");
+        const res = await fetch(url.toString());
         const data = await res.json();
-        setTowns(data.towns || []);
-      } else if (activeTab === "characters") {
-        const res = await fetch(`http://localhost:8004/idea-forge/characters?element=${elem || ''}&count=5`);
+        const key = activeTab === "magic" ? "techniques" : activeTab;
+        setResults(data[key] || []);
+      } else {
+        // AI-powered generation
+        const res = await fetch(`${API_BASE}/idea-forge/ai-generate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            category: activeTab,
+            prompt: customPrompt,
+            element: elem || "",
+            count: 5,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || "AI generation failed");
+        }
         const data = await res.json();
-        setCharacters(data.characters || []);
-      } else if (activeTab === "magic") {
-        const res = await fetch(`http://localhost:8004/idea-forge/magic-techniques?element=${elem || ''}&count=5`);
-        const data = await res.json();
-        setTechniques(data.techniques || []);
-      } else if (activeTab === "plots") {
-        const res = await fetch(`http://localhost:8004/idea-forge/plot-seeds?element=${elem || ''}&count=5`);
-        const data = await res.json();
-        setPlots(data.plots || []);
+        setResults(data.ideas || []);
+        setAiModel(data.model || "");
       }
-    } catch (e) {
-      console.error("Generation failed:", e);
+    } catch (e: any) {
+      setError(e.message || "Generation failed");
     }
     setLoading(false);
   };
 
-  useEffect(() => { generate(); }, [activeTab, element]);
-
   const getElementColor = (el: string) => {
     const colors: Record<string, string> = {
-      Fire: "text-red-400", Water: "text-blue-400", Earth: "text-amber-400",
-      Wind: "text-cyan-400", Spirit: "text-purple-400"
+      Fire: "text-red-400",
+      Water: "text-blue-400",
+      Earth: "text-amber-400",
+      Wind: "text-cyan-400",
+      Spirit: "text-purple-400",
     };
     return colors[el] || "text-slate-400";
+  };
+
+  const renderResult = (item: IdeaResult, index: number) => {
+    switch (activeTab) {
+      case "towns":
+        return (
+          <div key={index} className="bg-slate-800/50 border border-slate-700 p-4 rounded-lg">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold text-white text-lg">{item.name}</span>
+              {item.element && (
+                <span className={`text-xs ${getElementColor(item.element)}`}>
+                  {item.element}
+                </span>
+              )}
+              {item.type && (
+                <span className="text-xs text-slate-500">{item.type}</span>
+              )}
+            </div>
+            <p className="text-slate-300 mt-2">{item.description}</p>
+          </div>
+        );
+
+      case "characters":
+        return (
+          <div key={index} className="bg-slate-800/50 border border-slate-700 p-4 rounded-lg">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold text-white text-lg">{item.name}</span>
+              {item.element && (
+                <span className={`text-xs ${getElementColor(item.element)}`}>
+                  {item.element}
+                </span>
+              )}
+              {item.role && (
+                <span className="text-xs bg-slate-600 px-2 py-0.5 rounded">
+                  {item.role}
+                </span>
+              )}
+            </div>
+            {item.traits && item.traits.length > 0 && (
+              <div className="flex gap-2 mt-2 flex-wrap">
+                {item.traits.map((t: string, j: number) => (
+                  <span
+                    key={j}
+                    className="text-xs bg-slate-700 px-2 py-1 rounded text-slate-300"
+                  >
+                    {t}
+                  </span>
+                ))}
+              </div>
+            )}
+            <p className="text-slate-300 mt-2">{item.concept}</p>
+          </div>
+        );
+
+      case "magic":
+        return (
+          <div key={index} className="bg-slate-800/50 border border-slate-700 p-4 rounded-lg">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold text-white text-lg">{item.name}</span>
+              {item.element && (
+                <span className={`text-xs ${getElementColor(item.element)}`}>
+                  {item.element}
+                </span>
+              )}
+              {item.difficulty && (
+                <span
+                  className={`text-xs px-2 py-0.5 rounded ${
+                    item.difficulty === "master"
+                      ? "bg-purple-600"
+                      : item.difficulty === "advanced"
+                      ? "bg-red-600"
+                      : item.difficulty === "intermediate"
+                      ? "bg-yellow-600"
+                      : "bg-green-600"
+                  }`}
+                >
+                  {item.difficulty}
+                </span>
+              )}
+            </div>
+            <p className="text-slate-300 mt-2">{item.description}</p>
+          </div>
+        );
+
+      case "plots":
+        return (
+          <div key={index} className="bg-slate-800/50 border border-slate-700 p-4 rounded-lg">
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              {item.element && (
+                <span className={`text-xs ${getElementColor(item.element)}`}>
+                  {item.element}
+                </span>
+              )}
+              {item.type && (
+                <span className="text-xs text-slate-500">{item.type}</span>
+              )}
+            </div>
+            <p className="text-slate-200">{item.plot}</p>
+          </div>
+        );
+
+      default:
+        return null;
+    }
   };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">⚒️ Idea Forge</h1>
-          <p className="text-slate-400">Generate content for your world</p>
+          <h1 className="text-2xl font-bold text-white">Idea Forge</h1>
+          <p className="text-slate-400">
+            Generate towns, characters, magic, and plot ideas
+          </p>
         </div>
-        <Link href="/" className="text-slate-400 hover:text-white">← Back</Link>
+        <Link href="/" className="text-slate-400 hover:text-white text-sm">
+          Back
+        </Link>
       </div>
 
-      {/* Controls */}
-      <div className="flex flex-wrap gap-4 items-center">
-        <select
-          value={element}
-          onChange={(e) => setElement(e.target.value)}
-          className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white"
-        >
-          {ELEMENTS.map(el => <option key={el} value={el}>{el} Element</option>)}
-        </select>
+      {/* Mode Toggle */}
+      <div className="flex gap-2 bg-slate-800/50 p-1 rounded-lg w-fit">
         <button
-          onClick={generate}
-          disabled={loading}
-          className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-500 disabled:opacity-50"
+          onClick={() => setMode("quick")}
+          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            mode === "quick"
+              ? "bg-amber-600 text-white"
+              : "text-slate-400 hover:text-white"
+          }`}
         >
-          {loading ? "Generating..." : "🎲 Generate"}
+          Quick Generate
+        </button>
+        <button
+          onClick={() => setMode("ai")}
+          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            mode === "ai"
+              ? "bg-amber-600 text-white"
+              : "text-slate-400 hover:text-white"
+          }`}
+        >
+          AI Generate
         </button>
       </div>
 
-      {/* Tabs */}
+      {mode === "ai" && (
+        <div className="bg-amber-900/20 border border-amber-500/30 rounded-lg p-3 text-sm text-amber-200">
+          AI mode uses your vault documents as context to generate ideas consistent
+          with your world.{" "}
+          <Link href="/settings" className="underline text-amber-400">
+            Configure your API key in Settings
+          </Link>
+          .
+        </div>
+      )}
+
+      {/* Category Tabs */}
       <div className="flex gap-2 border-b border-slate-700 pb-2">
-        {[
-          { id: "towns", label: "🏘️ Towns" },
-          { id: "characters", label: "👤 Characters" },
-          { id: "magic", label: "✨ Magic" },
-          { id: "plots", label: "📖 Plot Seeds" }
-        ].map(tab => (
+        {CATEGORIES.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id as any)}
-            className={`px-4 py-2 rounded-t-lg ${
+            onClick={() => {
+              setActiveTab(tab.id);
+              setResults([]);
+            }}
+            className={`px-4 py-2 rounded-t-lg text-sm font-medium transition-colors ${
               activeTab === tab.id
                 ? "bg-amber-600 text-white"
                 : "text-slate-400 hover:text-white"
             }`}
           >
-            {tab.label}
+            {tab.icon} {tab.label}
           </button>
         ))}
       </div>
 
-      {/* Results */}
-      <div className="space-y-4">
-        {activeTab === "towns" && towns.map((town, i) => (
-          <div key={i} className="bg-slate-800/50 border border-slate-700 p-4 rounded-lg">
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-white">{town.name}</span>
-              <span className={`text-xs ${getElementColor(town.element)}`}>{town.element}</span>
-              <span className="text-xs text-slate-500">{town.type}</span>
-            </div>
-            <p className="text-slate-300 mt-2">{town.description}</p>
-          </div>
-        ))}
+      {/* Controls */}
+      <div className="flex flex-wrap gap-3 items-end">
+        <div>
+          <label className="text-xs text-slate-400 block mb-1">Element</label>
+          <select
+            value={element}
+            onChange={(e) => setElement(e.target.value)}
+            className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm"
+          >
+            {ELEMENTS.map((el) => (
+              <option key={el} value={el}>
+                {el}
+              </option>
+            ))}
+          </select>
+        </div>
 
-        {activeTab === "characters" && characters.map((char, i) => (
-          <div key={i} className="bg-slate-800/50 border border-slate-700 p-4 rounded-lg">
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-white">{char.name}</span>
-              <span className={`text-xs ${getElementColor(char.element)}`}>{char.element}</span>
-              <span className="text-xs bg-slate-600 px-2 py-0.5 rounded">{char.role}</span>
-            </div>
-            <p className="text-slate-300 mt-2">{char.concept}</p>
-            <div className="flex gap-2 mt-2">
-              {char.traits.map((t, j) => (
-                <span key={j} className="text-xs bg-slate-700 px-2 py-1 rounded text-slate-300">{t}</span>
-              ))}
-            </div>
+        {mode === "ai" && (
+          <div className="flex-1 min-w-[200px]">
+            <label className="text-xs text-slate-400 block mb-1">
+              Custom direction (optional)
+            </label>
+            <input
+              type="text"
+              value={customPrompt}
+              onChange={(e) => setCustomPrompt(e.target.value)}
+              placeholder="e.g. A fishing village with a dark secret"
+              className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm placeholder-slate-500"
+            />
           </div>
-        ))}
+        )}
 
-        {activeTab === "magic" && techniques.map((tech, i) => (
-          <div key={i} className="bg-slate-800/50 border border-slate-700 p-4 rounded-lg">
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-white">{tech.name}</span>
-              <span className={`text-xs ${getElementColor(tech.element)}`}>{tech.element}</span>
-              <span className={`text-xs px-2 py-0.5 rounded ${
-                tech.difficulty === "master" ? "bg-purple-600" :
-                tech.difficulty === "advanced" ? "bg-red-600" :
-                tech.difficulty === "intermediate" ? "bg-yellow-600" : "bg-green-600"
-              }`}>{tech.difficulty}</span>
-            </div>
-            <p className="text-slate-300 mt-2">{tech.description}</p>
-          </div>
-        ))}
-
-        {activeTab === "plots" && plots.map((plot, i) => (
-          <div key={i} className="bg-slate-800/50 border border-slate-700 p-4 rounded-lg">
-            <div className="flex items-center gap-2 mb-2">
-              <span className={`text-xs ${getElementColor(plot.element)}`}>{plot.element}</span>
-              <span className="text-xs text-slate-500">{plot.type}</span>
-            </div>
-            <p className="text-slate-200">{plot.plot}</p>
-          </div>
-        ))}
+        <button
+          onClick={generate}
+          disabled={loading}
+          className="px-5 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-500 disabled:opacity-50 font-medium whitespace-nowrap"
+        >
+          {loading
+            ? "Generating..."
+            : mode === "ai"
+            ? "AI Generate"
+            : "Generate"}
+        </button>
       </div>
+
+      {/* Error */}
+      {error && (
+        <div className="bg-red-900/30 border border-red-500 text-red-200 p-3 rounded-lg text-sm">
+          {error}
+        </div>
+      )}
+
+      {/* Results */}
+      {results.length > 0 && (
+        <div className="space-y-3">
+          {mode === "ai" && aiModel && (
+            <p className="text-xs text-slate-500">
+              Generated by {aiModel}
+            </p>
+          )}
+          {results.map((item, i) => renderResult(item, i))}
+        </div>
+      )}
+
+      {!loading && results.length === 0 && !error && (
+        <div className="text-center text-slate-500 py-12">
+          <p className="text-3xl mb-2">🎲</p>
+          <p>Click Generate to create ideas</p>
+        </div>
+      )}
     </div>
   );
 }

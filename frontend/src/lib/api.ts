@@ -1,5 +1,5 @@
 // API client for Chronicler
-const API_BASE = 'http://localhost:8004';
+export const API_BASE = 'http://localhost:8004';
 
 export async function fetchStats() {
   const res = await fetch(`${API_BASE}/stats`);

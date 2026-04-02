@@ -33,6 +33,8 @@ export default function RootLayout({
                     <NavLink href="/locations">Locations</NavLink>
                     <NavLink href="/elements">Elements</NavLink>
                     <NavLink href="/possession">Possession</NavLink>
+                    <NavLink href="/ideaforge">Idea Forge</NavLink>
+                    <NavLink href="/settings">Settings</NavLink>
                   </div>
                 </div>
               </div>
