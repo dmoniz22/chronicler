@@ -4,50 +4,49 @@ Possession Chamber - Character embodiment system for Chronicler
 """
 
 import os
-from typing import List, Dict, Optional
-from pydantic import BaseModel
+from typing import List, Dict
 from neo4j import GraphDatabase
+from ai_client import call_ai
 
-# OpenRouter configuration
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-DEFAULT_MODEL = "mistralai/mistral-small"  # Low cost, good for creative writing
 
 class CharacterContext:
     """Builds context for a character from the vault."""
-    
+
     def __init__(self, driver):
         self.driver = driver
-    
+
     def get_character_info(self, character_name: str) -> Dict:
         """Fetch character details from Neo4j and vault files."""
         with self.driver.session() as session:
-            # Get character mentions
-            result = session.run("""
+            result = session.run(
+                """
                 MATCH (c:Character {name: $name})<-[:MENTIONS]-(d:Document)
                 RETURN d.title as title, d.path as path, d.content as content
-            """, {"name": character_name})
-            
+            """,
+                {"name": character_name},
+            )
             documents = [dict(record) for record in result]
-            
-            # Try to find dedicated character file
+
             char_file = None
             for doc in documents:
-                if character_name.lower() in doc["title"].lower() and "character" in doc["title"].lower():
+                if (
+                    character_name.lower() in doc["title"].lower()
+                    and "character" in doc["title"].lower()
+                ):
                     char_file = doc
                     break
-            
+
             return {
                 "name": character_name,
                 "documents": documents,
                 "profile": char_file["content"] if char_file else "",
-                "mentioned_count": len(documents)
+                "mentioned_count": len(documents),
             }
 
 
 class PossessionEngine:
     """Core engine for character embodiment."""
-    
-    # Character persona templates
+
     PERSONA_TEMPLATES = {
         "Alatha": """You are Alatha, protagonist of The Elemental Citadel series.
 
@@ -55,7 +54,7 @@ BACKGROUND:
 - New graduate of the Citadel with Spirit House training
 - From rural Westmarch farming community
 - Recently discovered you can control ALL five elements (Earth, Fire, Water, Wind, Spirit)
-- This is considered impossible/impossible by Citadel teaching
+- This is considered impossible by Citadel teaching
 - Currently trying to hide this ability while understanding it
 
 PERSONALITY:
@@ -79,7 +78,6 @@ CURRENT STATE:
 - Desperate to practice your abilities without being discovered
 
 Respond in first person as Alatha. Be authentic to her voice and circumstances.""",
-        
         "Fidomar": """You are Fidomar, Alatha's best friend and fellow Citadel graduate.
 
 BACKGROUND:
@@ -108,7 +106,6 @@ CURRENT STATE:
 - Planning to stay in touch despite assignments
 
 Respond in first person as Fidomar. Be steady, supportive, grounded.""",
-        
         "Elora": """You are Elora, Alatha's best female friend and fellow graduate.
 
 BACKGROUND:
@@ -136,102 +133,64 @@ CURRENT STATE:
 - Sensed something was off with Alatha at graduation
 - Planning to write frequently
 
-Respond in first person as Elora. Be light, perceptive, playful but caring."""
+Respond in first person as Elora. Be light, perceptive, playful but caring.""",
     }
-    
+
     def __init__(self, driver):
         self.driver = driver
         self.context_builder = CharacterContext(driver)
         self.chat_histories: Dict[str, List[Dict]] = {}
-    
+
     def get_system_prompt(self, character_name: str) -> str:
         """Build system prompt for character embodiment."""
-        # Check for known character template
         if character_name in self.PERSONA_TEMPLATES:
             return self.PERSONA_TEMPLATES[character_name]
-        
-        # Otherwise build from vault data
+
         char_info = self.context_builder.get_character_info(character_name)
-        
-        # Build generic prompt from documents
-        docs_summary = "\n".join([
-            f"- Mentioned in: {doc['title']}"
-            for doc in char_info["documents"][:5]
-        ])
-        
+        docs_summary = "\n".join(
+            [f"- Mentioned in: {doc['title']}" for doc in char_info["documents"][:5]]
+        )
+
         return f"""You are {character_name} from The Elemental Citadel fantasy series.
 
 CHARACTER CONTEXT:
-{char_info.get('profile', 'No detailed profile available.')}
+{char_info.get("profile", "No detailed profile available.")}
 
 APPEARANCES:
 {docs_summary}
 
 Respond in first person as this character. Stay true to their voice, personality, and worldview based on the source material. Be immersive and authentic."""
-    
-    async def chat(self, character_name: str, user_message: str, session_id: str = "default") -> str:
+
+    async def chat(
+        self, character_name: str, user_message: str, session_id: str = "default"
+    ) -> str:
         """Process a chat message in character."""
-        import aiohttp
-        
-        # Get or initialize chat history
         history_key = f"{session_id}_{character_name}"
         if history_key not in self.chat_histories:
             self.chat_histories[history_key] = []
-        
+
         history = self.chat_histories[history_key]
-        
-        # Build system prompt
         system_prompt = self.get_system_prompt(character_name)
-        
-        # Build messages for OpenRouter
+
         messages = [{"role": "system", "content": system_prompt}]
-        
-        # Add history (last 10 messages)
         for msg in history[-10:]:
             messages.append(msg)
-        
-        # Add current message
         messages.append({"role": "user", "content": user_message})
-        
-        # Call OpenRouter
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "http://localhost:8503",
-                    "X-Title": "Chronicler - Etheria Writing Companion"
-                },
-                json={
-                    "model": DEFAULT_MODEL,
-                    "messages": messages,
-                    "temperature": 0.8,
-                    "max_tokens": 500
-                }
-            ) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise Exception(f"OpenRouter error: {error_text}")
-                
-                result = await response.json()
-                assistant_message = result["choices"][0]["message"]["content"]
-                
-                # Store in history
-                history.append({"role": "user", "content": user_message})
-                history.append({"role": "assistant", "content": assistant_message})
-                
-                # Keep only last 20 messages
-                self.chat_histories[history_key] = history[-20:]
-                
-                return assistant_message
-    
+
+        assistant_message = await call_ai(messages, temperature=0.8, max_tokens=500)
+
+        history.append({"role": "user", "content": user_message})
+        history.append({"role": "assistant", "content": assistant_message})
+        self.chat_histories[history_key] = history[-20:]
+
+        return assistant_message
+
     def clear_history(self, character_name: str, session_id: str = "default"):
         """Clear chat history for a character."""
         history_key = f"{session_id}_{character_name}"
         if history_key in self.chat_histories:
             del self.chat_histories[history_key]
-    
+
     def get_available_characters(self) -> List[str]:
         """Get list of characters available for possession."""
         with self.driver.session() as session:
@@ -241,8 +200,8 @@ Respond in first person as this character. Stay true to their voice, personality
             return [record["name"] for record in result]
 
 
-# Global possession engine instance
 _possession_engine = None
+
 
 def get_possession_engine(driver):
     """Get or create possession engine singleton."""

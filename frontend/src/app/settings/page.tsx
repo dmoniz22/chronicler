@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import Link from "next/link";
 import { API_BASE } from "@/lib/api";
 
 interface Model {
@@ -11,35 +10,56 @@ interface Model {
 }
 
 export default function SettingsPage() {
+  const [provider, setProvider] = useState("openrouter");
   const [apiKey, setApiKey] = useState("");
   const [apiKeyMasked, setApiKeyMasked] = useState("");
-  const [model, setModel] = useState("openai/gpt-4o-mini");
+  const [openrouterModel, setOpenrouterModel] = useState("openai/gpt-4o-mini");
+  const [ollamaUrl, setOllamaUrl] = useState("http://localhost:11434");
+  const [ollamaModel, setOllamaModel] = useState("gemma3:12b");
   const [models, setModels] = useState<Model[]>([]);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState<"success" | "error">("success");
 
+  // Load current settings
   useEffect(() => {
-    // Load current settings
     fetch(`${API_BASE}/settings`)
       .then((r) => r.json())
       .then((data) => {
-        setModel(data.openrouter_model || "openai/gpt-4o-mini");
+        setProvider(data.provider || "openrouter");
+        setOpenrouterModel(data.openrouter_model || "openai/gpt-4o-mini");
+        setOllamaUrl(data.ollama_url || "http://localhost:11434");
+        setOllamaModel(data.ollama_model || "gemma3:12b");
         setApiKeyMasked(data.openrouter_api_key_masked || "");
       });
-
-    // Load available models
-    fetch(`${API_BASE}/settings/models`)
-      .then((r) => r.json())
-      .then((data) => setModels(data.models || []));
   }, []);
+
+  // Load models when provider changes
+  useEffect(() => {
+    loadModels();
+  }, [provider, ollamaUrl]);
+
+  const loadModels = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/settings/models`);
+      const data = await res.json();
+      setModels(data.models || []);
+    } catch {
+      setModels([]);
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
     setMessage("");
     try {
-      const body: Record<string, string> = { openrouter_model: model };
+      const body: Record<string, string> = {
+        provider,
+        openrouter_model: openrouterModel,
+        ollama_url: ollamaUrl,
+        ollama_model: ollamaModel,
+      };
       if (apiKey) {
         body.openrouter_api_key = apiKey;
       }
@@ -53,9 +73,10 @@ export default function SettingsPage() {
         setMessageType("success");
         setMessage("Settings saved!");
         if (apiKey) {
-          const key = apiKey;
           setApiKeyMasked(
-            key.length > 12 ? key.substring(0, 8) + "..." + key.slice(-4) : "***"
+            apiKey.length > 12
+              ? apiKey.substring(0, 8) + "..." + apiKey.slice(-4)
+              : "***"
           );
           setApiKey("");
         }
@@ -71,6 +92,8 @@ export default function SettingsPage() {
     setTesting(true);
     setMessage("");
     try {
+      // Save first to ensure env is updated
+      await handleSave();
       const res = await fetch(`${API_BASE}/settings/test`, { method: "POST" });
       const data = await res.json();
       setMessageType(data.success ? "success" : "error");
@@ -80,6 +103,10 @@ export default function SettingsPage() {
       setMessage("Connection test failed");
     }
     setTesting(false);
+  };
+
+  const handleRefreshOllama = async () => {
+    await loadModels();
   };
 
   return (
@@ -103,54 +130,135 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* API Key */}
+      {/* Provider Selection */}
       <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700 space-y-4">
-        <h2 className="text-lg font-semibold text-white">OpenRouter API Key</h2>
-        <p className="text-slate-400 text-sm">
-          Get your key at{" "}
-          <a
-            href="https://openrouter.ai/keys"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-amber-400 hover:underline"
+        <h2 className="text-lg font-semibold text-white">AI Provider</h2>
+        <div className="flex gap-3">
+          <button
+            onClick={() => setProvider("openrouter")}
+            className={`flex-1 p-4 rounded-lg border-2 transition-all ${
+              provider === "openrouter"
+                ? "border-amber-500 bg-amber-900/20"
+                : "border-slate-600 bg-slate-700/50 hover:border-slate-500"
+            }`}
           >
-            openrouter.ai/keys
-          </a>
-          . This enables AI-powered idea generation and character chat.
-        </p>
-        {apiKeyMasked && (
-          <p className="text-slate-500 text-sm">
-            Current key: <span className="text-slate-300 font-mono">{apiKeyMasked}</span>
-          </p>
-        )}
-        <input
-          type="password"
-          value={apiKey}
-          onChange={(e) => setApiKey(e.target.value)}
-          placeholder={apiKeyMasked ? "Enter new key to replace..." : "sk-or-..."}
-          className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-400 font-mono text-sm"
-        />
+            <div className="text-white font-semibold">OpenRouter</div>
+            <div className="text-slate-400 text-xs mt-1">
+              Cloud API. GPT-4o, Claude, Gemini, etc. Requires API key.
+            </div>
+          </button>
+          <button
+            onClick={() => setProvider("ollama")}
+            className={`flex-1 p-4 rounded-lg border-2 transition-all ${
+              provider === "ollama"
+                ? "border-amber-500 bg-amber-900/20"
+                : "border-slate-600 bg-slate-700/50 hover:border-slate-500"
+            }`}
+          >
+            <div className="text-white font-semibold">Ollama (Local)</div>
+            <div className="text-slate-400 text-xs mt-1">
+              Run models locally. Free, private. Requires Ollama running.
+            </div>
+          </button>
+        </div>
       </div>
+
+      {/* OpenRouter Settings */}
+      {provider === "openrouter" && (
+        <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700 space-y-4">
+          <h2 className="text-lg font-semibold text-white">OpenRouter API Key</h2>
+          <p className="text-slate-400 text-sm">
+            Get your key at{" "}
+            <a
+              href="https://openrouter.ai/keys"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-amber-400 hover:underline"
+            >
+              openrouter.ai/keys
+            </a>
+          </p>
+          {apiKeyMasked && (
+            <p className="text-slate-500 text-sm">
+              Current key:{" "}
+              <span className="text-slate-300 font-mono">{apiKeyMasked}</span>
+            </p>
+          )}
+          <input
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder={
+              apiKeyMasked ? "Enter new key to replace..." : "sk-or-..."
+            }
+            className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-400 font-mono text-sm"
+          />
+        </div>
+      )}
+
+      {/* Ollama Settings */}
+      {provider === "ollama" && (
+        <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700 space-y-4">
+          <h2 className="text-lg font-semibold text-white">Ollama Configuration</h2>
+          <p className="text-slate-400 text-sm">
+            Make sure Ollama is running locally. Install from{" "}
+            <a
+              href="https://ollama.ai"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-amber-400 hover:underline"
+            >
+              ollama.ai
+            </a>
+          </p>
+          <div>
+            <label className="text-xs text-slate-400 block mb-1">Ollama URL</label>
+            <input
+              type="text"
+              value={ollamaUrl}
+              onChange={(e) => setOllamaUrl(e.target.value)}
+              placeholder="http://localhost:11434"
+              className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white text-sm font-mono"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Model Selection */}
       <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700 space-y-4">
-        <h2 className="text-lg font-semibold text-white">AI Model</h2>
-        <p className="text-slate-400 text-sm">
-          Choose the model for idea generation and character chat.
-        </p>
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-white">Model</h2>
+          {provider === "ollama" && (
+            <button
+              onClick={handleRefreshOllama}
+              className="text-xs text-amber-400 hover:text-amber-300"
+            >
+              Refresh
+            </button>
+          )}
+        </div>
         <select
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
+          value={provider === "ollama" ? ollamaModel : openrouterModel}
+          onChange={(e) =>
+            provider === "ollama"
+              ? setOllamaModel(e.target.value)
+              : setOpenrouterModel(e.target.value)
+          }
           className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white"
         >
+          {models.length === 0 && (
+            <option value="">No models found</option>
+          )}
           {models.map((m) => (
             <option key={m.id} value={m.id}>
-              {m.name} ({m.cost} cost)
+              {m.name} ({m.cost})
             </option>
           ))}
         </select>
         <div className="text-slate-500 text-xs">
-          Recommended: GPT-4o Mini for best cost/quality ratio.
+          {provider === "ollama"
+            ? "Pull more models: ollama pull llama3.1"
+            : "Recommended: GPT-4o Mini for best cost/quality ratio."}
         </div>
       </div>
 
@@ -165,7 +273,7 @@ export default function SettingsPage() {
         </button>
         <button
           onClick={handleTest}
-          disabled={testing || !apiKeyMasked}
+          disabled={testing}
           className="px-6 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-500 disabled:opacity-50"
         >
           {testing ? "Testing..." : "Test Connection"}

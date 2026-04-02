@@ -57,7 +57,12 @@ export default function PossessionPage() {
       const data = await res.json();
       setMessages((m) => [...m, { role: "assistant", content: data.response }]);
     } catch (e: any) {
-      setError(`Problem with OpenRouter integration. Using offline mode.`);
+      const errorMsg = e?.message || "";
+      if (errorMsg.includes("No API key") || errorMsg.includes("No Ollama")) {
+        setError(`No AI provider configured. Go to Settings to set up OpenRouter or Ollama.`);
+      } else {
+        setError(`AI unavailable. Using offline mode.`);
+      }
       // Fallback: simple character responses
       const fallbackResponses: Record<string, string> = {
         "Alatha": "*shifts nervously, eyes showing five colors for a moment* I... I'm still getting used to this. Ask me about anything, I guess. But not too loud. Not yet.",

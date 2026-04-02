@@ -531,16 +531,22 @@ ENV_PATH = "/home/dmoniz/projects/chronicler/.env"
 
 
 class SettingsRequest(BaseModel):
+    provider: str = "openrouter"
     openrouter_api_key: str = ""
     openrouter_model: str = "openai/gpt-4o-mini"
+    ollama_url: str = "http://localhost:11434"
+    ollama_model: str = "gemma3:12b"
 
 
 @app.get("/settings")
 async def get_settings():
     """Read current settings from .env."""
     settings = {
+        "provider": "openrouter",
         "openrouter_api_key": "",
         "openrouter_model": "openai/gpt-4o-mini",
+        "ollama_url": "http://localhost:11434",
+        "ollama_model": "gemma3:12b",
     }
     if Path(ENV_PATH).exists():
         for line in Path(ENV_PATH).read_text().splitlines():
@@ -555,6 +561,12 @@ async def get_settings():
                     settings["openrouter_api_key"] = value
                 elif key == "OPENROUTER_MODEL":
                     settings["openrouter_model"] = value
+                elif key == "AI_PROVIDER":
+                    settings["provider"] = value
+                elif key == "OLLAMA_URL":
+                    settings["ollama_url"] = value
+                elif key == "OLLAMA_MODEL":
+                    settings["ollama_model"] = value
     # Mask the API key for display
     if settings["openrouter_api_key"]:
         key = settings["openrouter_api_key"]
@@ -569,95 +581,99 @@ async def get_settings():
 @app.post("/settings")
 async def save_settings(req: SettingsRequest):
     """Write settings to .env."""
+    env_keys = {
+        "AI_PROVIDER": req.provider,
+        "OPENROUTER_API_KEY": req.openrouter_api_key,
+        "OPENROUTER_MODEL": req.openrouter_model,
+        "OLLAMA_URL": req.ollama_url,
+        "OLLAMA_MODEL": req.ollama_model,
+    }
     lines = []
+    seen = set()
     if Path(ENV_PATH).exists():
         for line in Path(ENV_PATH).read_text().splitlines():
             stripped = line.strip()
             if stripped.startswith("#") or not stripped:
                 lines.append(line)
-            elif stripped.startswith("OPENROUTER_API_KEY="):
-                pass  # will replace
-            elif stripped.startswith("OPENROUTER_MODEL="):
-                pass  # will replace
+            elif "=" in stripped:
+                key = stripped.split("=", 1)[0].strip()
+                if key in env_keys:
+                    lines.append(f"{key}={env_keys[key]}")
+                    seen.add(key)
+                else:
+                    lines.append(line)
             else:
                 lines.append(line)
-    lines.append(f"OPENROUTER_API_KEY={req.openrouter_api_key}")
-    lines.append(f"OPENROUTER_MODEL={req.openrouter_model}")
+    for key, value in env_keys.items():
+        if key not in seen:
+            lines.append(f"{key}={value}")
     Path(ENV_PATH).write_text("\n".join(lines) + "\n")
     # Reload env for modules that use it
-    _os.environ["OPENROUTER_API_KEY"] = req.openrouter_api_key
-    _os.environ["OPENROUTER_MODEL"] = req.openrouter_model
+    for key, value in env_keys.items():
+        _os.environ[key] = value
     return {"success": True, "message": "Settings saved"}
 
 
 @app.get("/settings/models")
-async def list_openrouter_models():
-    """List popular OpenRouter models."""
-    return {
-        "models": [
-            {"id": "openai/gpt-4o-mini", "name": "GPT-4o Mini", "cost": "Low"},
-            {"id": "openai/gpt-4o", "name": "GPT-4o", "cost": "Medium"},
-            {
-                "id": "anthropic/claude-3.5-sonnet",
-                "name": "Claude 3.5 Sonnet",
-                "cost": "Medium",
-            },
-            {"id": "google/gemini-pro-1.5", "name": "Gemini Pro 1.5", "cost": "Medium"},
-            {
-                "id": "meta-llama/llama-3.1-405b-instruct",
-                "name": "Llama 3.1 405B",
-                "cost": "Medium",
-            },
-            {
-                "id": "meta-llama/llama-3.1-70b-instruct",
-                "name": "Llama 3.1 70B",
-                "cost": "Low",
-            },
-            {
-                "id": "mistralai/mistral-large",
-                "name": "Mistral Large",
-                "cost": "Medium",
-            },
-            {"id": "mistralai/mistral-small", "name": "Mistral Small", "cost": "Low"},
-            {"id": "deepseek/deepseek-chat", "name": "DeepSeek V3", "cost": "Low"},
-        ]
-    }
+async def list_models():
+    """List available models for the configured provider."""
+    provider = _os.environ.get("AI_PROVIDER", "openrouter")
+    if provider == "ollama":
+        from ai_client import list_ollama_models
+
+        ollama_url = _os.environ.get("OLLAMA_URL", "http://localhost:11434")
+        models = await list_ollama_models(ollama_url)
+        return {
+            "provider": "ollama",
+            "models": [{"id": m, "name": m, "cost": "Free"} for m in models],
+        }
+    else:
+        return {
+            "provider": "openrouter",
+            "models": [
+                {"id": "openai/gpt-4o-mini", "name": "GPT-4o Mini", "cost": "Low"},
+                {"id": "openai/gpt-4o", "name": "GPT-4o", "cost": "Medium"},
+                {
+                    "id": "anthropic/claude-3.5-sonnet",
+                    "name": "Claude 3.5 Sonnet",
+                    "cost": "Medium",
+                },
+                {
+                    "id": "google/gemini-pro-1.5",
+                    "name": "Gemini Pro 1.5",
+                    "cost": "Medium",
+                },
+                {
+                    "id": "meta-llama/llama-3.1-405b-instruct",
+                    "name": "Llama 3.1 405B",
+                    "cost": "Medium",
+                },
+                {
+                    "id": "meta-llama/llama-3.1-70b-instruct",
+                    "name": "Llama 3.1 70B",
+                    "cost": "Low",
+                },
+                {
+                    "id": "mistralai/mistral-large",
+                    "name": "Mistral Large",
+                    "cost": "Medium",
+                },
+                {
+                    "id": "mistralai/mistral-small",
+                    "name": "Mistral Small",
+                    "cost": "Low",
+                },
+                {"id": "deepseek/deepseek-chat", "name": "DeepSeek V3", "cost": "Low"},
+            ],
+        }
 
 
 @app.post("/settings/test")
 async def test_api_connection():
-    """Test if the OpenRouter API key works."""
-    import aiohttp
+    """Test the configured AI provider."""
+    from ai_client import test_provider
 
-    api_key = _os.environ.get("OPENROUTER_API_KEY", "")
-    if not api_key:
-        raise HTTPException(status_code=400, detail="No API key configured")
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": "openai/gpt-4o-mini",
-                    "messages": [{"role": "user", "content": "Say OK"}],
-                    "max_tokens": 5,
-                },
-                timeout=15.0,
-            ) as resp:
-                if resp.status == 200:
-                    return {"success": True, "message": "API key works"}
-                else:
-                    text = await resp.text()
-                    return {
-                        "success": False,
-                        "message": f"Error {resp.status}: {text[:200]}",
-                    }
-    except Exception as e:
-        return {"success": False, "message": str(e)}
+    return await test_provider()
 
 
 # === AI Idea Forge ===
@@ -673,18 +689,13 @@ class AIGenerateRequest(BaseModel):
 @app.post("/idea-forge/ai-generate")
 async def ai_generate_ideas(req: AIGenerateRequest):
     """Generate ideas using AI with context from the vault."""
-    import aiohttp
+    from ai_client import call_ai, get_settings as _get_ai_settings
+    import json as _json
 
-    api_key = _os.environ.get("OPENROUTER_API_KEY", "")
-    model = _os.environ.get("OPENROUTER_MODEL", "openai/gpt-4o-mini")
-    if not api_key:
-        raise HTTPException(
-            status_code=400,
-            detail="No API key configured. Go to Settings to add your OpenRouter API key.",
-        )
+    ai_settings = _get_ai_settings()
+    provider = ai_settings["provider"]
 
     # Build world context from Neo4j
-    world_context = ""
     with driver.session() as session:
         chars = session.run(
             "MATCH (c:Character) RETURN c.name as name ORDER BY c.name"
@@ -695,7 +706,6 @@ async def ai_generate_ideas(req: AIGenerateRequest):
         elems = session.run(
             "MATCH (e:Element) RETURN e.name as name ORDER BY e.name"
         ).data()
-        # Get a sample of document content for flavor
         docs = session.run(
             "MATCH (d:Document) RETURN d.title as title, d.content as content LIMIT 5"
         ).data()
@@ -709,7 +719,6 @@ async def ai_generate_ideas(req: AIGenerateRequest):
         f"--- {d['title']} ---\n{(d['content'] or '')[:500]}" for d in docs
     )
 
-    # Category-specific prompts
     category_prompts = {
         "towns": f"""Generate {req.count} unique fantasy town/city ideas for the world of Etheria.
 Each should have: a name, which element it's aligned with, its type (city/town/village), and a vivid 2-3 sentence description.
@@ -745,35 +754,21 @@ Return ONLY valid JSON, no markdown fences or explanation."""
     if req.element:
         user_prompt += f"\n\nFocus on the {req.element} element."
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    "temperature": 0.8,
-                    "max_tokens": 1500,
-                },
-                timeout=60.0,
-            ) as resp:
-                if resp.status != 200:
-                    text = await resp.text()
-                    raise HTTPException(
-                        status_code=502, detail=f"OpenRouter error: {text[:300]}"
-                    )
-                result = await resp.json()
-                content = result["choices"][0]["message"]["content"]
+    model_name = (
+        ai_settings.get("ollama_model", "")
+        if provider == "ollama"
+        else ai_settings.get("openrouter_model", "")
+    )
 
-        # Parse JSON from response (handle markdown fences)
-        import json as _json
+    try:
+        content = await call_ai(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.8,
+            max_tokens=1500,
+        )
 
         clean = content.strip()
         if clean.startswith("```"):
@@ -783,15 +778,19 @@ Return ONLY valid JSON, no markdown fences or explanation."""
         clean = clean.strip()
 
         ideas = _json.loads(clean)
-        return {"ideas": ideas, "category": req.category, "model": model}
+        return {
+            "ideas": ideas,
+            "category": req.category,
+            "model": model_name,
+            "provider": provider,
+        }
     except _json.JSONDecodeError:
         return {
             "ideas": [],
             "category": req.category,
             "raw_response": content,
             "error": "Failed to parse JSON from AI response",
+            "provider": provider,
         }
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
