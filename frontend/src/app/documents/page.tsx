@@ -51,9 +51,11 @@ export default async function DocumentsPage({ searchParams }: {
           <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-2xl font-bold text-amber-400">{selectedDoc.title}</h2>
-              <span className="px-3 py-1 bg-slate-700 rounded-full text-sm text-slate-300">
-                {selectedDoc.type}
-              </span>
+              <div className="flex gap-2">
+                <span className="px-3 py-1 bg-slate-700 rounded-full text-sm text-slate-300">
+                  {selectedDoc.type}
+                </span>
+              </div>
             </div>
             <div className="prose prose-invert max-w-none">
               <p className="text-slate-300 whitespace-pre-wrap">

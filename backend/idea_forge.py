@@ -2,17 +2,35 @@
 """
 Idea Forge - Content generation system for Chronicler
 Generates towns, characters, plot ideas, magic techniques based on your world
+Uses AI for intelligent content generation.
 """
 
 import os
 import random
+import json
 from typing import List, Dict
 from neo4j import GraphDatabase
 
+try:
+    import httpx
+    HAS_HTTPX = True
+except ImportError:
+    HAS_HTTPX = False
+
+# Load .env file for this project
+try:
+    from dotenv import load_dotenv
+    load_dotenv('/home/dmoniz/projects/chronicler/.env')
+    print("📖 Loaded .env file")
+except ImportError:
+    print("⚠️ python-dotenv not installed, skipping .env loading")
+except Exception as e:
+    print(f"⚠️ Could not load .env: {e}")
+
 # OpenRouter configuration
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-DEFAULT_MODEL = "openchat/openchat-7b"  # Free model for generation
-
+DEFAULT_MODEL = "openrouter/qwen/qwen3.5-35b-a3b"  # Use your primary model
+FALLBACK_MODEL = "moldavid/chatgpt-4o-mini-2024-07-18"  # Fallback if needed
 
 class IdeaForge:
     """Generate creative content for the Etheria Chronicles."""
@@ -34,20 +52,109 @@ class IdeaForge:
 
     def __init__(self, driver):
         self.driver = driver
+    
+    def _call_ai(self, prompt: str, model: str = None) -> str:
+        """Call OpenRouter AI for content generation."""
+        if not OPENROUTER_API_KEY:
+            return None
+        
+        if not HAS_HTTPX:
+            return None
+        
+        model = model or DEFAULT_MODEL
+        
+        try:
+            response = httpx.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": "You are a creative writing assistant for a fantasy novel world called Etheria. Generate creative, coherent, and thematically appropriate content."
+                        },
+                        {"role": "user", "content": prompt}
+                    ],
+                    "max_tokens": 1000,
+                    "temperature": 0.7,
+                },
+                timeout=60.0
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
+        except Exception as e:
+            print(f"AI call failed: {e}")
+            return None
+    
+    def _get_world_context(self) -> str:
+        """Get current world state from Neo4j for AI context."""
+        with self.driver.session() as session:
+            # Get existing characters
+            char_result = session.run("MATCH (c:Character) RETURN c.name as name LIMIT 20")
+            characters = [r["name"] for r in char_result]
+            
+            # Get existing locations
+            loc_result = session.run("MATCH (l:Location) RETURN l.name as name LIMIT 20")
+            locations = [r["name"] for r in loc_result]
+            
+            # Get elements
+            elem_result = session.run("MATCH (e:Element) RETURN e.name as name")
+            elements = [r["name"] for r in elem_result]
+            
+            return f"""Existing characters: {', '.join(characters[:10]) if characters else 'None'}\n"
+Existing locations: {', '.join(locations[:10]) if locations else 'None'}\n"
+Elements in world: {', '.join(elements)}"""
 
     def generate_town_names(self, element: str = None, location_type: str = "town", count: int = 5) -> List[Dict]:
-        """Generate town names based on element affinity."""
+        """Generate town names based on element affinity using AI."""
         results = []
+        
+        # Get world context
+        context = self._get_world_context()
+        
+        # Use AI to generate coherent names
+        prompt = f"""Generate {count} unique fantasy town names for a fantasy world called Etheria. Each name should be appropriate for a {location_type} and optionally reflect the '{element}' element if provided.
 
-        # Get context from existing towns in vault
-        with self.driver.session() as session:
-            existing = session.run("""
-                MATCH (l:Location)<-[:MENTIONS]-(d:Document)
-                WHERE l.name CONTAINS $type OR d.title CONTAINS 'Town' OR d.title CONTAINS 'City'
-                RETURN l.name as name LIMIT 20
-            """, {"type": location_type}).data()
-            existing_names = [r["name"] for r in existing]
+Context (existing content to avoid duplicates):
+{context}
 
+Rules:
+- Make names sound cohesive with each other
+- Avoid duplicating existing names
+- Return ONLY a JSON array of objects with "name" and "element" fields
+- Example: [{{"name": "Cinderhold", "element": "Fire"}}, ...]
+
+Generate {count} names:"""
+        
+        ai_response = self._call_ai(prompt)
+        
+        if ai_response:
+            try:
+                # Try to parse as JSON
+                ai_names = json.loads(ai_response)
+                for name_info in ai_names[:count]:
+                    results.append({
+                        "name": name_info.get("name", f"{random.choice(self.ELEMENT_PREFIXES.get(element, ['Stone']))}{random.choice(self.LOCATION_SUFFIXES.get(location_type, ['ton']))}"),
+                        "element": name_info.get("element") or element or random.choice(list(self.ELEMENT_PREFIXES.keys())),
+                        "type": location_type,
+                        "suggested_description": "Generate description using AI for consistency with world setting"
+                    })
+                if results:
+                    return results
+            except:
+                pass  # Fall back to traditional method
+        
+        # Fallback to traditional generation
+        return self._generate_town_names_traditional(element, location_type, count)
+
+    def _generate_town_names_traditional(self, element: str = None, location_type: str = "town", count: int = 5) -> List[Dict]:
+        """Traditional generation method if AI fails."""
+        results = []
         elements = [element] if element else list(self.ELEMENT_PREFIXES.keys())
 
         for _ in range(count):
@@ -55,7 +162,6 @@ class IdeaForge:
             prefix = random.choice(self.ELEMENT_PREFIXES[elem])
             suffix = random.choice(self.LOCATION_SUFFIXES[location_type])
 
-            # Combine creatively
             patterns = [
                 f"{prefix}{suffix}",
                 f"{prefix}{random.choice(self.LOCATION_SUFFIXES[location_type])}",
@@ -70,11 +176,24 @@ class IdeaForge:
                 "type": location_type,
                 "suggested_description": self._generate_town_description(elem, name, location_type)
             })
-
         return results
-
+    
     def _generate_town_description(self, element: str, name: str, loc_type: str) -> str:
-        """Generate a brief description for a generated town."""
+        """Generate AI-powered town description."""
+        context = self._get_world_context()
+        prompt = f"""Write a single-paragraph description of the fantasy town '{name}' in the world of Etheria.
+This town is aligned with the '{element}' element.
+
+Context (for consistency):
+{context}
+
+Write 2-3 sentences describing what makes this town unique and its connection to the {element} element."""
+        
+        ai_desc = self._call_ai(prompt)
+        if ai_desc:
+            return ai_desc.strip()
+        
+        # Fallback to traditional descriptions
         descriptions = {
             "Fire": [
                 f"A {loc_type} built around volcanic vents, famous for glassblowing and smithing.",

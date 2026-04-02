@@ -1,7 +1,7 @@
 #!/bin/bash
 # Chronicler - Stop All Services
 
-SCRIPT_DIR="$($(issue_377_read_83f9b63d7d374741b994d23e6e2b65e8)cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 GREEN='\033[0;32m'
