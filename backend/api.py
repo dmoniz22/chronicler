@@ -90,7 +90,7 @@ async def get_documents(doc_type: Optional[str] = None):
 
 @app.get("/documents/{document_id:path}")
 async def get_document(document_id: str):
-    """Get a specific document by path."""
+    """Get a specific document by path. Reads full content from filesystem."""
     from urllib.parse import unquote_plus
 
     # Decode URL-encoded characters
@@ -98,6 +98,8 @@ async def get_document(document_id: str):
     decoded_path = unquote_plus(document_id)
     # Only prepend / if not already present (avoid //home/... when %2F decoded)
     path = decoded_path if decoded_path.startswith("/") else "/" + decoded_path
+
+    # Get metadata from Neo4j
     with driver.session() as session:
         result = session.run(
             "MATCH (d:Document {path: $path}) RETURN d", {"path": path}
@@ -105,7 +107,23 @@ async def get_document(document_id: str):
         record = result.single()
         if not record:
             raise HTTPException(status_code=404, detail="Document not found")
-        return dict(record["d"])
+        doc = dict(record["d"])
+
+    # Read full content from filesystem (vault is source of truth)
+    file_path = Path(path)
+    if file_path.exists():
+        try:
+            raw = file_path.read_text()
+            post = frontmatter.loads(raw)
+            doc["content"] = post.content
+            doc["frontmatter"] = post.metadata
+            doc["full_length"] = len(post.content)
+        except Exception:
+            doc["content"] = file_path.read_text()
+            doc["frontmatter"] = {}
+            doc["full_length"] = len(doc["content"])
+
+    return doc
 
 
 @app.get("/characters", response_model=List[Character])

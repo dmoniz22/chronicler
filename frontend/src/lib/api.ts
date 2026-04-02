@@ -41,3 +41,21 @@ export async function fetchEntityMentions(entityType: string, entityName: string
   const res = await fetch(`${API_BASE}/entity/${entityType}/${encodeURIComponent(entityName)}`);
   return res.json();
 }
+
+export async function updateDocument(path: string, content: string, append: boolean = false) {
+  const res = await fetch(`${API_BASE}/documents/${encodeURIComponent(path)}/update`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content, append }),
+  });
+  return res.json();
+}
+
+export async function createDocument(title: string, content: string, docType: string = 'note') {
+  const res = await fetch(`${API_BASE}/documents/create`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, content, doc_type: docType }),
+  });
+  return res.json();
+}
